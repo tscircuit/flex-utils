@@ -30,12 +30,17 @@ export function foldSurfaceMesh<T extends SurfaceMesh>(
   })
   const { min, max } = mesh.boundingBox
   type Vertex = { p: Point3; uv: { u: number; v: number } }
-  const split = (
-    polygon: Vertex[],
-    nx: number,
-    ny: number,
-    d: number,
-  ): Vertex[][] => {
+  const split = ({
+    polygon,
+    nx,
+    ny,
+    d,
+  }: {
+    polygon: Vertex[]
+    nx: number
+    ny: number
+    d: number
+  }): Vertex[][] => {
     const distances = polygon.map(({ p }) => nx * p.x + ny * p.y - d)
     if (Math.min(...distances) >= -EPS || Math.max(...distances) <= EPS)
       return [polygon]
@@ -86,7 +91,9 @@ export function foldSurfaceMesh<T extends SurfaceMesh>(
       })),
     ]
     for (const { b, d } of planes)
-      polygons = polygons.flatMap((p) => split(p, b.nx, b.ny, d))
+      polygons = polygons.flatMap((p) =>
+        split({ polygon: p, nx: b.nx, ny: b.ny, d: d }),
+      )
     for (const polygon of polygons) {
       for (const b of fold.bends) {
         const mid =
