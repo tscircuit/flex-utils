@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import {
   createPcbFold,
   transformCadComponent,
+  transformCadPose,
+  type CadPose,
   transformCircuitJsonCadComponents,
   rotateVector,
   type CadComponentWithFoldState,
@@ -252,4 +254,23 @@ test("ordinary PCB data is unchanged when folding is requested", () => {
   expect(transformCircuitJsonCadComponents(json, { foldPcbs: true })).toEqual(
     json,
   )
+})
+
+
+test("CAD poses can be folded before a component id exists", () => {
+  const pose: CadPose = { position: base.position, rotation: base.rotation }
+  const context = {
+    fold: createPcbFold([bend], 0.15),
+    boardCenter: { x: 0, y: 0 },
+    flatMount: { x: 20, y: 7 },
+  }
+  const folded = transformCadPose(pose, context, true)
+  expect(folded.is_on_folded_board).toBe(true)
+  expect(folded).not.toHaveProperty("cad_component_id")
+  expect(folded.position.z).toBeGreaterThan(10)
+  const restored = transformCadPose(folded, context, false)
+  close(restored.position, pose.position)
+  close(rotateVector({ x: 1, y: 0, z: 0 }, restored.rotation!),
+    rotateVector({ x: 1, y: 0, z: 0 }, pose.rotation!))
+  expect(pose.is_on_folded_board).toBeUndefined()
 })

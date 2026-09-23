@@ -52,11 +52,27 @@ export interface CadFoldContext {
   defaultRotation?: Point3
 }
 
+export type CadPose = Pick<
+  CadComponentWithFoldState,
+  "position" | "rotation" | "is_on_folded_board"
+>
+
 /** Pure, idempotent CAD pose conversion. Position is global Circuit JSON +Z-up
  * millimeters; rotation is XYZ degrees. Model-origin/scale/normal fields stay
  * model-local. The PCB mount selects the inverse when assembled regions overlap.
  */
 export function transformCadComponent<T extends CadComponentWithFoldState>(
+  cad: T,
+  context: CadFoldContext,
+  folded: boolean,
+): T {
+  return transformCadPose(cad, context, folded)
+}
+
+/** Transform a CAD pose before a circuit-json record/id exists. Coordinates
+ * and rotations use the same world-space convention as transformCadComponent.
+ */
+export function transformCadPose<T extends CadPose>(
   cad: T,
   context: CadFoldContext,
   folded: boolean,
@@ -68,7 +84,7 @@ export function transformCadComponent<T extends CadComponentWithFoldState>(
     y: flatMount.y - boardCenter.y,
     z: 0,
   }
-  fold.assertRigid([anchor], cad.cad_component_id)
+  fold.assertRigid([anchor], "CAD mount")
   const point = {
     x: cad.position.x - boardCenter.x,
     y: cad.position.y - boardCenter.y,
