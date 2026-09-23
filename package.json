@@ -37,6 +37,6 @@
     "tsup": "^8.5.0"
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   }
 }

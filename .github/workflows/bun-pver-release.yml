@@ -1,12 +1,13 @@
 # Created using @tscircuit/plop (npm install -g @tscircuit/plop)
-name: Publish to npm
+name: Publish to GitHub Packages
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 permissions:
   contents: write
-  id-token: write
+  packages: write
   pull-requests: write
 
 jobs:
@@ -14,6 +15,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -21,11 +24,13 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org/
+          registry-url: https://npm.pkg.github.com
+          scope: "@tscircuit"
           package-manager-cache: false
       - run: npm install -g pver
       - run: bun install
       - run: bun run build
       - run: pver release
         env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
