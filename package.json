@@ -1,6 +1,6 @@
 {
   "name": "@tscircuit/flex-utils",
-  "version": "0.0.1",
+  "version": "0.0.5",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
