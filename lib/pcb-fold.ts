@@ -107,7 +107,11 @@ export function createPcbFold(
       throw new Error("Overlapping PCB bend zones are not supported")
   }
   const distalFirst = [...bends].reverse()
-  const transform = (p: Point3, anchor: Point3, direction: boolean): Point3 => {
+  const transform = ({
+    p,
+    anchor,
+    direction,
+  }: { p: Point3; anchor: Point3; direction: boolean }): Point3 => {
     let result = { ...p }
     // Fold distal regions first, then carry them with each proximal fold.
     for (const b of distalFirst) {
@@ -135,25 +139,37 @@ export function createPcbFold(
   }
   // For a fixed flat mount this is an affine rigid transform R*p + t.
   // Its inverse is R^T*(p-t), even when different folded regions overlap.
-  const inverse = (p: Point3, anchor: Point3, direction: boolean): Point3 => {
+  const inverse = ({
+    p,
+    anchor,
+    direction,
+  }: { p: Point3; anchor: Point3; direction: boolean }): Point3 => {
     const origin = direction
       ? { x: 0, y: 0, z: 0 }
-      : transform({ x: 0, y: 0, z: 0 }, anchor, false)
+      : transform({
+          p: { x: 0, y: 0, z: 0 },
+          anchor: anchor,
+          direction: false,
+        })
     const d = { x: p.x - origin.x, y: p.y - origin.y, z: p.z - origin.z }
     const axes = [
       { x: 1, y: 0, z: 0 },
       { x: 0, y: 1, z: 0 },
       { x: 0, y: 0, z: 1 },
-    ].map((v) => transform(v, anchor, true))
+    ].map((v) => transform({ p: v, anchor: anchor, direction: true }))
     const dot = (v: Point3) => v.x * d.x + v.y * d.y + v.z * d.z
     return { x: dot(axes[0]!), y: dot(axes[1]!), z: dot(axes[2]!) }
   }
   return {
     bends,
-    inversePoint: (p, anchor) => inverse(p, anchor, false),
-    inverseDirection: (p, anchor) => inverse(p, anchor, true),
-    point: (p, anchor = p) => transform(p, anchor, false),
-    direction: (p, anchor) => transform(p, anchor, true),
+    inversePoint: (p, anchor) =>
+      inverse({ p: p, anchor: anchor, direction: false }),
+    inverseDirection: (p, anchor) =>
+      inverse({ p: p, anchor: anchor, direction: true }),
+    point: (p, anchor = p) =>
+      transform({ p: p, anchor: anchor, direction: false }),
+    direction: (p, anchor) =>
+      transform({ p: p, anchor: anchor, direction: true }),
     assertRigid(points, label) {
       for (const b of bends) {
         const ds = points.map((p) => p.x * b.nx + p.y * b.ny)

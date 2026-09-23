@@ -5,11 +5,15 @@ import { boundsOfTriangles } from "./surface"
 
 /** Stiffener vertices stay board-local (+Z up, mm). Stiffeners are rigid and may
  * not cross a bend zone. Includes the adhesive spacing from the board surface. */
-export function createStiffenerMesh(
-  stiffener: PcbStiffener,
-  boardThickness: number,
-  fold?: PcbFold,
-) {
+export function createStiffenerMesh({
+  stiffener,
+  boardThickness,
+  fold,
+}: {
+  stiffener: PcbStiffener
+  boardThickness: number
+  fold?: PcbFold
+}) {
   const adhesive = stiffener.adhesive_thickness ?? 0
   if (
     !Number.isFinite(adhesive) ||
@@ -44,11 +48,11 @@ export function createStiffenerMesh(
         })()
   const near = boardThickness / 2 + adhesive,
     far = near + stiffener.thickness
-  const mesh = extrudePolygon(
-    outline,
-    stiffener.layer === "top" ? near : -far,
-    stiffener.layer === "top" ? far : -near,
-  )
+  const mesh = extrudePolygon({
+    outline: outline,
+    bottom: stiffener.layer === "top" ? near : -far,
+    top: stiffener.layer === "top" ? far : -near,
+  })
   if (!fold) return mesh
   fold.assertRigid(
     mesh.triangles.flatMap((t) => t.vertices),

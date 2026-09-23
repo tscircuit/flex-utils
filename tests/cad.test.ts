@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import {
   createPcbFold,
   transformCadComponent,
+  transformCadComponentPlacement,
+  type CadComponentPlacement,
   transformCircuitJsonCadComponents,
   rotateVector,
   type CadComponentWithFoldState,
@@ -25,7 +27,7 @@ const close = (a: { x: number; y: number; z: number }, b: typeof a) => {
 }
 const base: CadComponentWithFoldState = {
   type: "cad_component",
-  cad_component_id: "cad",
+  cad_component_id: "cadComponent",
   source_component_id: "src",
   pcb_component_id: "pcb",
   position: { x: 20, y: 7, z: 0.5 },
@@ -34,7 +36,7 @@ const base: CadComponentWithFoldState = {
   anchor_alignment: "center",
 }
 
-test("CAD pose forward/inverse, all layers, oblique axes, arbitrary rotations and gimbal lock", () => {
+test("CAD component placement forward/inverse, all layers, oblique axes, arbitrary rotations and gimbal lock", () => {
   for (const angle of [-130, 90, 180])
     for (const bottom of [false, true])
       for (const z of [0, 37, 90, 180, 270]) {
@@ -49,7 +51,7 @@ test("CAD pose forward/inverse, all layers, oblique axes, arbitrary rotations an
           ],
           0.15,
         )
-        const cad = {
+        const cadComponent = {
           ...base,
           position: { x: 20, y: 17, z: bottom ? -0.5 : 0.5 },
           rotation: { x: bottom ? 180 : 17, y: 29, z },
@@ -59,11 +61,19 @@ test("CAD pose forward/inverse, all layers, oblique axes, arbitrary rotations an
           boardCenter: { x: 5, y: 3 },
           flatMount: { x: 20, y: 17 },
         }
-        const folded = transformCadComponent(cad, ctx, true)
+        const folded = transformCadComponent(
+          { cadComponent: cadComponent, foldPcbs: true },
+          ctx,
+        )
         expect(folded.is_on_folded_board).toBe(true)
-        expect(transformCadComponent(folded, ctx, true)).toBe(folded)
-        const restored = transformCadComponent(folded, ctx, false)
-        close(restored.position, cad.position)
+        expect(
+          transformCadComponent({ cadComponent: folded, foldPcbs: true }, ctx),
+        ).toBe(folded)
+        const restored = transformCadComponent(
+          { cadComponent: folded, foldPcbs: false },
+          ctx,
+        )
+        close(restored.position, cadComponent.position)
         for (const v of [
           { x: 1, y: 0, z: 0 },
           { x: 0, y: 1, z: 0 },
@@ -71,19 +81,21 @@ test("CAD pose forward/inverse, all layers, oblique axes, arbitrary rotations an
         ])
           close(
             rotateVector(v, restored.rotation!),
-            rotateVector(v, cad.rotation),
+            rotateVector(v, cadComponent.rotation),
           )
       }
   const fold = createPcbFold([bend], 0.15)
   const ctx = { fold, boardCenter: { x: 0, y: 0 }, flatMount: { x: 6, y: 3 } }
   const moved = transformCadComponent(
     {
-      ...base,
-      position: { x: 6, y: 3, z: 0.4 },
-      rotation: { x: 0, y: 0, z: 0 },
+      cadComponent: {
+        ...base,
+        position: { x: 6, y: 3, z: 0.4 },
+        rotation: { x: 0, y: 0, z: 0 },
+      },
+      foldPcbs: true,
     },
     ctx,
-    true,
   )
   // At a +90-degree bend, height becomes -X and distance past the tangent becomes +Z.
   close(moved.position, {
@@ -96,14 +108,18 @@ test("CAD pose forward/inverse, all layers, oblique axes, arbitrary rotations an
     y: 0,
     z: 0,
   })
-  close(transformCadComponent(moved, ctx, false).position, {
-    x: 6,
-    y: 3,
-    z: 0.4,
-  })
+  close(
+    transformCadComponent({ cadComponent: moved, foldPcbs: false }, ctx)
+      .position,
+    {
+      x: 6,
+      y: 3,
+      z: 0.4,
+    },
+  )
 })
 
-test("mixed Circuit JSON poses normalize without mutating PCB data and reject orphan folded CAD", () => {
+test("mixed Circuit JSON placements normalize without mutating PCB data and reject orphan folded CAD", () => {
   const json = [
     {
       type: "pcb_board",
@@ -142,16 +158,16 @@ test("mixed Circuit JSON poses normalize without mutating PCB data and reject or
 })
 
 test("surface subdivision keeps top UVs tied to the flat sheet and spans the arc", () => {
-  const mesh = extrudePolygon(
-    [
+  const mesh = extrudePolygon({
+    outline: [
       { x: -5, y: -1 },
       { x: 6, y: -1 },
       { x: 6, y: 1 },
       { x: -5, y: 1 },
     ],
-    -0.075,
-    0.075,
-  )
+    bottom: -0.075,
+    top: 0.075,
+  })
   const folded = foldSurfaceMesh(mesh, createPcbFold([bend], 0.15))
   expect(folded.triangles.length).toBeGreaterThan(mesh.triangles.length)
   expect(folded.boundingBox.max.z).toBeCloseTo(2 + 6 - Math.PI / 2, 5)
@@ -184,19 +200,28 @@ test("four bends stack three distinct mounts and each inverse recovers its own d
         surface = fold.point(mount)
       close(surface, { x: -pitch, y: 2, z: i * 6 })
       close(fold.inversePoint(surface, mount), mount)
-      const cad = {
+      const cadComponent = {
         ...base,
         position: { ...mount, z: 0.3 },
         rotation: { x: 0, y: 0, z: 37 },
       }
       const ctx = { fold, boardCenter: { x: 0, y: 0 }, flatMount: mount }
-      const posed = transformCadComponent(cad, ctx, true)
-      close(posed.position, {
+      const foldedCadComponent = transformCadComponent(
+        { cadComponent: cadComponent, foldPcbs: true },
+        ctx,
+      )
+      close(foldedCadComponent.position, {
         x: -pitch,
         y: 2,
         z: i * 6 + (i === 1 ? -0.3 : 0.3),
       })
-      close(transformCadComponent(posed, ctx, false).position, cad.position)
+      close(
+        transformCadComponent(
+          { cadComponent: foldedCadComponent, foldPcbs: false },
+          ctx,
+        ).position,
+        cadComponent.position,
+      )
     }
   }
 })
@@ -252,4 +277,33 @@ test("ordinary PCB data is unchanged when folding is requested", () => {
   expect(transformCircuitJsonCadComponents(json, { foldPcbs: true })).toEqual(
     json,
   )
+})
+
+test("CAD component placements can be folded before a component id exists", () => {
+  const cadComponentPlacement: CadComponentPlacement = {
+    position: base.position,
+    rotation: base.rotation,
+  }
+  const context = {
+    fold: createPcbFold([bend], 0.15),
+    boardCenter: { x: 0, y: 0 },
+    flatMount: { x: 20, y: 7 },
+  }
+  const folded = transformCadComponentPlacement(
+    { cadComponentPlacement: cadComponentPlacement, foldPcbs: true },
+    context,
+  )
+  expect(folded.is_on_folded_board).toBe(true)
+  expect(folded).not.toHaveProperty("cad_component_id")
+  expect(folded.position.z).toBeGreaterThan(10)
+  const restored = transformCadComponentPlacement(
+    { cadComponentPlacement: folded, foldPcbs: false },
+    context,
+  )
+  close(restored.position, cadComponentPlacement.position)
+  close(
+    rotateVector({ x: 1, y: 0, z: 0 }, restored.rotation!),
+    rotateVector({ x: 1, y: 0, z: 0 }, cadComponentPlacement.rotation!),
+  )
+  expect(cadComponentPlacement.is_on_folded_board).toBeUndefined()
 })

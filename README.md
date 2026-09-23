@@ -27,7 +27,7 @@ Equivalent Euler triples at gimbal lock may differ, but the pose round-trips.
   `point`/`direction`, and `inversePoint`/`inverseDirection` with a **flat anchor**.
 - `foldSurfaceMesh(mesh, fold)`: tessellate at tangencies and at most 5-degree arc
   intervals, retaining flat UVs, face identity, and triangle metadata.
-- `extrudePolygon(outline, bottom, top)` / `createStiffenerMesh(...)`: shared
+- `extrudePolygon({ outline, bottom, top })` / `createStiffenerMesh(...)`: shared
   polygon extrusion and rigid stiffener geometry including adhesive spacing.
 - `transformCadComponent` / `getCadFoldContext`: single-component pose helpers.
 
@@ -37,3 +37,5 @@ lie in bend zones. Unsupported geometry throws. This package has no Three.js,
 GLTF, DOM, native addon, model loader or rendering dependency.
 
 Run `bun test`, `bun run typecheck`, and `bun run build`.
+
+`transformCadComponent({ cadComponent, foldPcbs }, context)` transforms an existing record. `transformCadComponentPlacement({ cadComponentPlacement, foldPcbs }, context)` transforms its position and rotation before a record exists. Both use `CadFoldContext` as the second argument.

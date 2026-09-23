@@ -52,61 +52,83 @@ export interface CadFoldContext {
   defaultRotation?: Point3
 }
 
-/** Pure, idempotent CAD pose conversion. Position is global Circuit JSON +Z-up
+export type CadComponentPlacement = Pick<
+  CadComponentWithFoldState,
+  "position" | "rotation" | "is_on_folded_board"
+>
+
+/** Pure, idempotent CAD component placement conversion. Position is global Circuit JSON +Z-up
  * millimeters; rotation is XYZ degrees. Model-origin/scale/normal fields stay
  * model-local. The PCB mount selects the inverse when assembled regions overlap.
  */
 export function transformCadComponent<T extends CadComponentWithFoldState>(
-  cad: T,
+  { cadComponent, foldPcbs }: { cadComponent: T; foldPcbs: boolean },
   context: CadFoldContext,
-  folded: boolean,
 ): T {
-  if ((cad.is_on_folded_board === true) === folded) return cad
+  return transformCadComponentPlacement(
+    { cadComponentPlacement: cadComponent, foldPcbs },
+    context,
+  )
+}
+
+/** Transform a CAD component placement before a circuit-json record/id exists. Coordinates
+ * and rotations use the same world-space convention as transformCadComponent.
+ */
+export function transformCadComponentPlacement<T extends CadComponentPlacement>(
+  {
+    cadComponentPlacement,
+    foldPcbs,
+  }: { cadComponentPlacement: T; foldPcbs: boolean },
+  context: CadFoldContext,
+): T {
+  if ((cadComponentPlacement.is_on_folded_board === true) === foldPcbs)
+    return cadComponentPlacement
   const { fold, boardCenter, flatMount } = context
   const anchor = {
     x: flatMount.x - boardCenter.x,
     y: flatMount.y - boardCenter.y,
     z: 0,
   }
-  fold.assertRigid([anchor], cad.cad_component_id)
+  fold.assertRigid([anchor], "CAD mount")
   const point = {
-    x: cad.position.x - boardCenter.x,
-    y: cad.position.y - boardCenter.y,
-    z: cad.position.z,
+    x: cadComponentPlacement.position.x - boardCenter.x,
+    y: cadComponentPlacement.position.y - boardCenter.y,
+    z: cadComponentPlacement.position.z,
   }
-  const direction = folded ? fold.direction : fold.inverseDirection
-  const transformed = folded
+  const direction = foldPcbs ? fold.direction : fold.inverseDirection
+  const transformed = foldPcbs
     ? fold.point(point, anchor)
     : fold.inversePoint(point, anchor)
-  const rotation = cad.rotation ??
+  const rotation = cadComponentPlacement.rotation ??
     context.defaultRotation ?? { x: 0, y: 0, z: 0 }
   const basis = axes.map((v) => direction(rotateVector(v, rotation), anchor))
   return {
-    ...cad,
+    ...cadComponentPlacement,
     position: {
       x: transformed.x + boardCenter.x,
       y: transformed.y + boardCenter.y,
       z: transformed.z,
     },
     rotation: rotationFromAxes(basis),
-    is_on_folded_board: folded,
+    is_on_folded_board: foldPcbs,
   }
 }
 
 /** Resolve an explicit board reference, then subcircuit ownership. An ambiguous
  * multi-board association fails rather than guessing from folded coordinates. */
 export function getCadFoldContext(
-  cad: CadComponentWithFoldState,
+  cadComponent: CadComponentWithFoldState,
   json: AnyCircuitElement[],
 ): CadFoldContext | undefined {
   const pcb = json.find(
     (e) =>
-      e.type === "pcb_component" && e.pcb_component_id === cad.pcb_component_id,
+      e.type === "pcb_component" &&
+      e.pcb_component_id === cadComponent.pcb_component_id,
   )
   if (pcb?.type !== "pcb_component") {
-    if (cad.is_on_folded_board)
+    if (cadComponent.is_on_folded_board)
       throw new Error(
-        `Folded CAD ${cad.cad_component_id} requires its flat pcb_component reference`,
+        `Folded CAD ${cadComponent.cad_component_id} requires its flat pcb_component reference`,
       )
     return undefined
   }
@@ -125,7 +147,7 @@ export function getCadFoldContext(
         : undefined
   if (!board)
     throw new Error(
-      `Cannot unambiguously resolve board for CAD ${cad.cad_component_id}`,
+      `Cannot unambiguously resolve board for CAD ${cadComponent.cad_component_id}`,
     )
   const bends = json.filter(
     (e): e is PcbBendRecord =>
@@ -136,7 +158,7 @@ export function getCadFoldContext(
     boardCenter: board.center,
     flatMount: pcb.center,
     defaultRotation: {
-      x: (cad.layer ?? pcb.layer) === "bottom" ? 180 : 0,
+      x: (cadComponent.layer ?? pcb.layer) === "bottom" ? 180 : 0,
       y: 0,
       z: 0,
     },
@@ -145,7 +167,7 @@ export function getCadFoldContext(
 
 /** Transform CAD records only; PCB traces/components, bends, stiffeners, source
  * records and the caller's input array are left untouched. Mixed flat/folded CAD
- * is normalized record-by-record, so repeated calls cannot double-fold a pose. */
+ * is normalized record-by-record, so repeated calls cannot double-fold a placement. */
 export function transformCircuitJsonCadComponents<T extends AnyCircuitElement>(
   json: T[],
   options: { foldPcbs: boolean },
@@ -153,12 +175,19 @@ export function transformCircuitJsonCadComponents<T extends AnyCircuitElement>(
   const hasBends = json.some((element) => element.type === "pcb_bend")
   return json.map((element) => {
     if (element.type !== "cad_component") return element
-    const cad = element as CadComponentWithFoldState
-    if (!hasBends && !cad.is_on_folded_board) return element
-    if ((cad.is_on_folded_board === true) === options.foldPcbs) return element
-    const context = getCadFoldContext(cad, json)
-    if (!context || (!context.fold.bends.length && !cad.is_on_folded_board))
+    const cadComponent = element as CadComponentWithFoldState
+    if (!hasBends && !cadComponent.is_on_folded_board) return element
+    if ((cadComponent.is_on_folded_board === true) === options.foldPcbs)
       return element
-    return transformCadComponent(cad, context, options.foldPcbs) as T
+    const context = getCadFoldContext(cadComponent, json)
+    if (
+      !context ||
+      (!context.fold.bends.length && !cadComponent.is_on_folded_board)
+    )
+      return element
+    return transformCadComponent(
+      { cadComponent: cadComponent, foldPcbs: options.foldPcbs },
+      context,
+    ) as T
   })
 }
