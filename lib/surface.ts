@@ -96,6 +96,7 @@ export function foldSurfaceMesh<T extends SurfaceMesh>(
       )
     for (const polygon of polygons) {
       for (const b of fold.bends) {
+        if (b.movingOutline) continue
         const mid =
           polygon.reduce((sum, { p }) => sum + p.x * b.nx + p.y * b.ny, 0) /
           polygon.length

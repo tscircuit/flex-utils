@@ -1,4 +1,9 @@
-import type { Point3 } from "./types"
+import type { Point2, Point3 } from "./types"
+import {
+  getFiniteBendRegion,
+  pointInPolygon,
+  polygonsTouch,
+} from "./finite-bend-region"
 /** Circuit JSON bend geometry, board-local +Z up, millimeters. */
 export interface PcbBendRecord {
   type: "pcb_bend"
@@ -24,6 +29,7 @@ interface Bend {
   radius: number
   axisMin: number
   axisMax: number
+  movingOutline?: readonly Point2[]
 }
 const EPS = 1e-7
 
@@ -37,6 +43,11 @@ export interface PcbFold {
   assertRigid(points: Point3[], label: string): void
 }
 
+export interface PcbFoldOptions {
+  /** Simple board outline, board-local XY in millimeters. Enables finite chords. */
+  outline?: readonly Point2[]
+}
+
 /** Parallel bends with the same moving direction form an ordered fold chain.
  * Input endpoints and returned transforms are board-local Circuit JSON (+Z up, mm).
  * Ordering comes from geometry, never from Circuit JSON array order.
@@ -44,9 +55,18 @@ export interface PcbFold {
 export function createPcbFold(
   records: PcbBendRecord[],
   thickness: number,
+  { outline }: PcbFoldOptions = {},
 ): PcbFold {
   if (!Number.isFinite(thickness) || thickness < 0)
     throw new Error("Board thickness must be finite and nonnegative")
+  if (
+    outline &&
+    (outline.length < 3 ||
+      outline.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)))
+  )
+    throw new Error(
+      "A finite board outline with at least three points is required",
+    )
   const bends: Bend[] = records
     .map((b) => {
       const { start, end, bend_angle: degrees, bend_radius: radius } = b
@@ -71,7 +91,7 @@ export function createPcbFold(
       const angle = (degrees * Math.PI) / 180
       const width = radius * Math.abs(angle)
       const center = start.x * nx + start.y * ny
-      return {
+      const geometry: Bend = {
         id: b.pcb_bend_id,
         nx,
         ny,
@@ -88,6 +108,17 @@ export function createPcbFold(
           -ny * end.x + nx * end.y,
         ),
       }
+      if (outline && Math.abs(angle) > EPS)
+        geometry.movingOutline = getFiniteBendRegion({
+          outline,
+          nx,
+          ny,
+          center,
+          proximal: geometry.start,
+          axisMin: geometry.axisMin,
+          axisMax: geometry.axisMax,
+        })
+      return geometry
     })
     .filter((b) => Math.abs(b.angle) > EPS)
   const first = bends[0]
@@ -102,10 +133,18 @@ export function createPcbFold(
     )
   }
   bends.sort((a, b) => a.start - b.start)
-  for (let i = 1; i < bends.length; i++) {
-    if (bends[i]!.start < bends[i - 1]!.end - EPS)
-      throw new Error("Overlapping PCB bend zones are not supported")
-  }
+  for (let i = 0; i < bends.length; i++)
+    for (let j = i + 1; j < bends.length; j++) {
+      const a = bends[i]!,
+        b = bends[j]!
+      if (
+        b.start < a.end - EPS &&
+        (!a.movingOutline ||
+          !b.movingOutline ||
+          polygonsTouch(a.movingOutline, b.movingOutline))
+      )
+        throw new Error("Overlapping PCB bend zones are not supported")
+    }
   const distalFirst = [...bends].reverse()
   const transform = ({
     p,
@@ -115,6 +154,7 @@ export function createPcbFold(
     let result = { ...p }
     // Fold distal regions first, then carry them with each proximal fold.
     for (const b of distalFirst) {
+      if (b.movingOutline && !pointInPolygon(anchor, b.movingOutline)) continue
       const width = b.end - b.start
       const s = anchor.x * b.nx + anchor.y * b.ny - b.start
       const q = Math.max(0, Math.min(width, s))
@@ -172,8 +212,13 @@ export function createPcbFold(
       transform({ p: p, anchor: anchor, direction: true }),
     assertRigid(points, label) {
       for (const b of bends) {
-        const ds = points.map((p) => p.x * b.nx + p.y * b.ny)
-        if (Math.max(...ds) > b.start + EPS && Math.min(...ds) < b.end - EPS)
+        const width = b.end - b.start
+        const progress = points.map((p) =>
+          b.movingOutline && !pointInPolygon(p, b.movingOutline)
+            ? 0
+            : Math.max(0, Math.min(width, p.x * b.nx + p.y * b.ny - b.start)),
+        )
+        if (Math.max(...progress) > EPS && Math.min(...progress) < width - EPS)
           throw new Error(`${label} intersects PCB bend zone ${b.id}`)
       }
     },

@@ -23,7 +23,7 @@ surface points and bend endpoints are board-local. CAD positions and PCB mounts
 are in global Circuit JSON coordinates; board center translation is applied once.
 Equivalent Euler triples at gimbal lock may differ, but the pose round-trips.
 
-- `createPcbFold(bends, thickness)`: finite-radius neutral-surface deformation;
+- `createPcbFold(bends, thickness, { outline })`: finite-radius neutral-surface deformation;
   `point`/`direction`, and `inversePoint`/`inverseDirection` with a **flat anchor**.
 - `foldSurfaceMesh(mesh, fold)`: tessellate at tangencies and at most 5-degree arc
   intervals, retaining flat UVs, face identity, and triangle metadata.
@@ -31,8 +31,17 @@ Equivalent Euler triples at gimbal lock may differ, but the pose round-trips.
   polygon extrusion and rigid stiffener geometry including adhesive spacing.
 - `transformCadComponent` / `getCadFoldContext`: single-component pose helpers.
 
-Initial scope is parallel, non-overlapping bend chains sharing a moving direction.
-Bend axes must span the board cross-section; rigid mounts and stiffeners cannot
+Provide a simple, board-local outline to make each finite bend segment select the
+connected region it cuts off. A bend must cross that region from boundary to
+boundary. The curved strip must stay in one cross-section; folds whose moving
+region wraps behind its proximal tangent are unsupported. Widened distal tips
+are included, and independent tails can have bends at the same position. Omitting
+the outline retains the original infinite-line deformation. `getCadFoldContext`
+uses the Circuit JSON board outline automatically, translating it to board-local XY.
+
+Initial scope is parallel bend chains sharing a moving direction. Overlapping
+bend zones are allowed only on disjoint regions. Without an outline, bend axes
+must span the full board cross-section. Rigid mounts and stiffeners cannot
 lie in bend zones. Unsupported geometry throws. This package has no Three.js,
 GLTF, DOM, native addon, model loader or rendering dependency.
 
