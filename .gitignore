@@ -2,3 +2,4 @@ node_modules/
 dist/
 bun.lock
 bun.lockb
+tests/**/__snapshots__/*.diff.png
