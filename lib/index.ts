@@ -5,3 +5,9 @@ export * from "./cad"
 export * from "./polygon"
 
 export * from "./stiffener"
+export * from "./rigid"
+export {
+  PcbFoldError,
+  type PcbFoldIssue,
+  type PcbFoldResult,
+} from "./fold-result"

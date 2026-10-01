@@ -27,6 +27,9 @@ Equivalent Euler triples at gimbal lock may differ, but the pose round-trips.
   `point`/`direction`, and `inversePoint`/`inverseDirection` with a **flat anchor**.
 - `foldSurfaceMesh(mesh, fold)`: tessellate at tangencies and at most 5-degree arc
   intervals, retaining flat UVs, face identity, and triangle metadata.
+- `foldRigidMesh(mesh, fold, { flatAnchor, label, mount })`: carry rigid geometry
+  and normals with one flat anchor. An optional PCB mount is validated separately
+  from model extents, including models offset away from their mount.
 - `extrudePolygon({ outline, bottom, top })` / `createStiffenerMesh(...)`: shared
   polygon extrusion and rigid stiffener geometry including adhesive spacing.
 - `transformCadComponent` / `getCadFoldContext`: single-component pose helpers.
@@ -44,6 +47,16 @@ bend zones are allowed only on disjoint regions. Without an outline, bend axes
 must span the full board cross-section. Rigid mounts and stiffeners cannot
 lie in bend zones. Unsupported geometry throws. This package has no Three.js,
 GLTF, DOM, native addon, model loader or rendering dependency.
+
+Renderers can use `tryCreatePcbFold`, `tryFoldSurfaceMesh`, `tryFoldRigidMesh`, and
+`tryFoldStiffenerMesh` to handle expected folding limitations explicitly. These
+return `{ ok: true, value }` or `{ ok: false, issue }`, where `issue` has a stable
+`code`, a `message`, and an optional `bendId`. For stiffeners, construct the flat
+mesh once, then call `tryFoldStiffenerMesh(mesh, stiffener, fold)` to preserve the
+shared outline-average anchor. The caller chooses whether to retain flat geometry
+and how to report the issue. Strict APIs throw `PcbFoldError` carrying the same
+issue and retain their existing messages. Malformed flat geometry and unexpected
+errors still throw through the result APIs; CAD pose normalization remains strict.
 
 Run `bun test`, `bun run typecheck`, and `bun run build`.
 

@@ -1,4 +1,5 @@
 import type { Point2 } from "./types"
+import { PcbFoldError } from "./fold-result"
 
 const EPS = 1e-7
 type BoundaryCrossing = { point: Point2; edge: number; fraction: number }
@@ -109,6 +110,7 @@ function movingPolygon(
  * Simple outlines with one connected cross-section through the bend are supported.
  */
 export function getFiniteBendRegion({
+  bendId,
   outline,
   nx,
   ny,
@@ -117,6 +119,7 @@ export function getFiniteBendRegion({
   axisMin,
   axisMax,
 }: {
+  bendId?: string
   outline: readonly Point2[]
   nx: number
   ny: number
@@ -132,16 +135,23 @@ export function getFiniteBendRegion({
     },
   )
   if (finiteCrossings.length !== 2)
-    throw new Error(
-      "A finite PCB bend must cut one board cross-section from boundary to boundary",
-    )
+    throw new PcbFoldError({
+      code: "invalid_finite_bend_region",
+      message:
+        "A finite PCB bend must cut one board cross-section from boundary to boundary",
+      bendId,
+    })
   const [a, b] = finiteCrossings as [BoundaryCrossing, BoundaryCrossing]
   const middle = {
     x: (a.point.x + b.point.x) / 2,
     y: (a.point.y + b.point.y) / 2,
   }
   if (!pointInPolygon(middle, outline, false))
-    throw new Error("A finite PCB bend must pass through the board interior")
+    throw new PcbFoldError({
+      code: "invalid_finite_bend_region",
+      message: "A finite PCB bend must pass through the board interior",
+      bendId,
+    })
   const centerRegion = movingPolygon(outline, a, b, nx, ny)
   const alongMiddle = -ny * middle.x + nx * middle.y
   const proximalCrossings = lineCrossings(outline, nx, ny, proximal)
@@ -169,9 +179,12 @@ export function getFiniteBendRegion({
       break
     return region
   }
-  throw new Error(
-    "The finite PCB bend zone must remain in one connected board cross-section",
-  )
+  throw new PcbFoldError({
+    code: "invalid_finite_bend_region",
+    message:
+      "The finite PCB bend zone must remain in one connected board cross-section",
+    bendId,
+  })
 }
 
 export function polygonsTouch(a: readonly Point2[], b: readonly Point2[]) {
