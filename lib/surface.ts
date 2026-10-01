@@ -1,5 +1,10 @@
 import type { Point3, Triangle, SurfaceMesh } from "./types"
 import type { PcbFold } from "./pcb-fold"
+import {
+  capturePcbFoldResult,
+  PcbFoldError,
+  type PcbFoldResult,
+} from "./fold-result"
 const EPS = 1e-7
 export function boundsOfTriangles(triangles: Triangle[]) {
   const points = triangles.flatMap((t) => t.vertices)
@@ -108,9 +113,11 @@ export function foldSurfaceMesh<T extends SurfaceMesh>(
             return along < b.axisMin - EPS || along > b.axisMax + EPS
           })
         )
-          throw new Error(
-            `PCB bend ${b.id} must span the full board cross-section through its bend zone`,
-          )
+          throw new PcbFoldError({
+            code: "incomplete_bend_cross_section",
+            message: `PCB bend ${b.id} must span the full board cross-section through its bend zone`,
+            bendId: b.id,
+          })
       }
       for (let i = 1; i + 1 < polygon.length; i++) {
         const verts = [polygon[0]!, polygon[i]!, polygon[i + 1]!]
@@ -138,4 +145,14 @@ export function foldSurfaceMesh<T extends SurfaceMesh>(
     }
   }
   return { ...mesh, triangles, boundingBox: boundsOfTriangles(triangles) }
+}
+
+/** Tessellate and fold a board-local surface (+Z up, mm), reporting expected
+ * unsupported cross-sections as data. Unexpected deformation failures throw.
+ */
+export function tryFoldSurfaceMesh<T extends SurfaceMesh>(
+  mesh: T,
+  fold: PcbFold,
+): PcbFoldResult<T> {
+  return capturePcbFoldResult(() => foldSurfaceMesh(mesh, fold))
 }

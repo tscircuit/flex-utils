@@ -1,5 +1,10 @@
 import type { Point2, Point3 } from "./types"
 import {
+  capturePcbFoldResult,
+  PcbFoldError,
+  type PcbFoldResult,
+} from "./fold-result"
+import {
   getFiniteBendRegion,
   pointInPolygon,
   polygonsTouch,
@@ -76,15 +81,19 @@ export function createPcbFold(
         radius <= thickness / 2 ||
         !["left", "right"].includes(b.bend_side)
       ) {
-        throw new Error(
-          `Invalid PCB bend ${b.pcb_bend_id}: finite geometry and radius greater than half the board thickness are required`,
-        )
+        throw new PcbFoldError({
+          code: "invalid_bend_geometry",
+          message: `Invalid PCB bend ${b.pcb_bend_id}: finite geometry and radius greater than half the board thickness are required`,
+          bendId: b.pcb_bend_id,
+        })
       }
       const length = Math.hypot(end.x - start.x, end.y - start.y)
       if (length < EPS || Math.abs(degrees) > 180)
-        throw new Error(
-          `Unsupported PCB bend ${b.pcb_bend_id}: distinct endpoints and angles within ±180 degrees are required`,
-        )
+        throw new PcbFoldError({
+          code: "unsupported_bend_geometry",
+          message: `Unsupported PCB bend ${b.pcb_bend_id}: distinct endpoints and angles within ±180 degrees are required`,
+          bendId: b.pcb_bend_id,
+        })
       const sign = b.bend_side === "right" ? 1 : -1
       const nx = (sign * (end.y - start.y)) / length
       const ny = (-sign * (end.x - start.x)) / length
@@ -110,6 +119,7 @@ export function createPcbFold(
       }
       if (outline && Math.abs(angle) > EPS)
         geometry.movingOutline = getFiniteBendRegion({
+          bendId: b.pcb_bend_id,
           outline,
           nx,
           ny,
@@ -128,9 +138,11 @@ export function createPcbFold(
       (b) => Math.abs(b.nx - first.nx) > EPS || Math.abs(b.ny - first.ny) > EPS,
     )
   ) {
-    throw new Error(
-      "Folded PCB rendering currently requires parallel bends with the same moving direction",
-    )
+    throw new PcbFoldError({
+      code: "nonparallel_bends",
+      message:
+        "Folded PCB rendering currently requires parallel bends with the same moving direction",
+    })
   }
   bends.sort((a, b) => a.start - b.start)
   for (let i = 0; i < bends.length; i++)
@@ -143,14 +155,22 @@ export function createPcbFold(
           !b.movingOutline ||
           polygonsTouch(a.movingOutline, b.movingOutline))
       )
-        throw new Error("Overlapping PCB bend zones are not supported")
+        throw new PcbFoldError({
+          code: "overlapping_bend_zones",
+          message: "Overlapping PCB bend zones are not supported",
+          bendId: b.id,
+        })
     }
   const distalFirst = [...bends].reverse()
   const transform = ({
     p,
     anchor,
     direction,
-  }: { p: Point3; anchor: Point3; direction: boolean }): Point3 => {
+  }: {
+    p: Point3
+    anchor: Point3
+    direction: boolean
+  }): Point3 => {
     let result = { ...p }
     // Fold distal regions first, then carry them with each proximal fold.
     for (const b of distalFirst) {
@@ -183,7 +203,11 @@ export function createPcbFold(
     p,
     anchor,
     direction,
-  }: { p: Point3; anchor: Point3; direction: boolean }): Point3 => {
+  }: {
+    p: Point3
+    anchor: Point3
+    direction: boolean
+  }): Point3 => {
     const origin = direction
       ? { x: 0, y: 0, z: 0 }
       : transform({
@@ -219,8 +243,23 @@ export function createPcbFold(
             : Math.max(0, Math.min(width, p.x * b.nx + p.y * b.ny - b.start)),
         )
         if (Math.max(...progress) > EPS && Math.min(...progress) < width - EPS)
-          throw new Error(`${label} intersects PCB bend zone ${b.id}`)
+          throw new PcbFoldError({
+            code: "rigid_bend_zone_intersection",
+            message: `${label} intersects PCB bend zone ${b.id}`,
+            bendId: b.id,
+          })
       }
     },
   }
+}
+
+/** Construct a board-local (+Z up, mm) fold, reporting expected folding
+ * limitations as data. Malformed board geometry and unexpected errors throw.
+ */
+export function tryCreatePcbFold(
+  records: PcbBendRecord[],
+  thickness: number,
+  options: PcbFoldOptions = {},
+): PcbFoldResult<PcbFold> {
+  return capturePcbFoldResult(() => createPcbFold(records, thickness, options))
 }
