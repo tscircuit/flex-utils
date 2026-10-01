@@ -154,7 +154,12 @@ export function getCadFoldContext(
       e.type === "pcb_bend" && e.pcb_board_id === board.pcb_board_id,
   )
   return {
-    fold: createPcbFold(bends, board.thickness ?? 1.6),
+    fold: createPcbFold(bends, board.thickness ?? 1.6, {
+      outline: board.outline?.map((p) => ({
+        x: p.x - board.center.x,
+        y: p.y - board.center.y,
+      })),
+    }),
     boardCenter: board.center,
     flatMount: pcb.center,
     defaultRotation: {

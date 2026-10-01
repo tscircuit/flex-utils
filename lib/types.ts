@@ -1,3 +1,7 @@
+export interface Point2 {
+  x: number
+  y: number
+}
 export interface Point3 {
   x: number
   y: number
