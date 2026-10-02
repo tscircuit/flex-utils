@@ -7,6 +7,7 @@ import {
 import {
   getFiniteBendRegion,
   pointInPolygon,
+  polygonContainsPolygon,
   polygonsTouch,
 } from "./finite-bend-region"
 /** Circuit JSON bend geometry, board-local +Z up, millimeters. */
@@ -53,9 +54,79 @@ export interface PcbFoldOptions {
   outline?: readonly Point2[]
 }
 
-/** Parallel bends with the same moving direction form an ordered fold chain.
+/** Order board-local bends (+Z up, mm) from parent to child. A finite moving
+ * region may be independent or nested wholly beyond a parent's curved strip.
+ * Child folds then occur first and are carried rigidly by their parent folds.
+ */
+function orderPcbBends(bends: Bend[]): Bend[] {
+  const sorted = [...bends].sort(
+    (a, b) =>
+      a.start - b.start ||
+      a.nx - b.nx ||
+      a.ny - b.ny ||
+      a.id.localeCompare(b.id),
+  )
+  const parents = new Map<Bend, Bend[]>()
+  const overlap = (bend: Bend): never => {
+    throw new PcbFoldError({
+      code: "overlapping_bend_zones",
+      message:
+        "Overlapping PCB bend zones or incompatible moving regions are not supported",
+      bendId: bend.id,
+    })
+  }
+  for (let i = 0; i < sorted.length; i++)
+    for (let j = i + 1; j < sorted.length; j++) {
+      const a = sorted[i]!,
+        b = sorted[j]!
+      if (a.movingOutline && b.movingOutline) {
+        if (!polygonsTouch(a.movingOutline, b.movingOutline)) continue
+        const aContainsB = polygonContainsPolygon(
+          a.movingOutline,
+          b.movingOutline,
+        )
+        const bContainsA = polygonContainsPolygon(
+          b.movingOutline,
+          a.movingOutline,
+        )
+        if (aContainsB === bContainsA) overlap(b)
+        const parent = aContainsB ? a : b,
+          child = aContainsB ? b : a
+        if (
+          child.movingOutline!.some(
+            (p) => p.x * parent.nx + p.y * parent.ny < parent.end - EPS,
+          )
+        )
+          overlap(child)
+        parents.set(child, [...(parents.get(child) ?? []), parent])
+      } else {
+        // Without an outline, preserve the legacy infinite-line fold chain.
+        if (Math.abs(a.nx - b.nx) > EPS || Math.abs(a.ny - b.ny) > EPS)
+          throw new PcbFoldError({
+            code: "nonparallel_bends",
+            message:
+              "Nonparallel PCB bends or bends with opposite moving directions require a board outline to resolve their moving regions",
+          })
+        if (b.start < a.end - EPS) overlap(b)
+        parents.set(b, [...(parents.get(b) ?? []), a])
+      }
+    }
+  const ordered: Bend[] = [],
+    visited = new Set<Bend>()
+  const visit = (bend: Bend) => {
+    if (visited.has(bend)) return
+    for (const parent of parents.get(bend) ?? []) visit(parent)
+    visited.add(bend)
+    ordered.push(bend)
+  }
+  for (const bend of sorted) visit(bend)
+  return ordered
+}
+
+/** Independent finite regions and rigidly nested regions can bend about any axis.
  * Input endpoints and returned transforms are board-local Circuit JSON (+Z up, mm).
- * Ordering comes from geometry, never from Circuit JSON array order.
+ * Ordering comes from region containment, never from Circuit JSON array order.
+ * Without a board outline, bends must remain parallel with one moving direction.
  */
 export function createPcbFold(
   records: PcbBendRecord[],
@@ -131,37 +202,8 @@ export function createPcbFold(
       return geometry
     })
     .filter((b) => Math.abs(b.angle) > EPS)
-  const first = bends[0]
-  if (
-    first &&
-    bends.some(
-      (b) => Math.abs(b.nx - first.nx) > EPS || Math.abs(b.ny - first.ny) > EPS,
-    )
-  ) {
-    throw new PcbFoldError({
-      code: "nonparallel_bends",
-      message:
-        "Folded PCB rendering currently requires parallel bends with the same moving direction",
-    })
-  }
-  bends.sort((a, b) => a.start - b.start)
-  for (let i = 0; i < bends.length; i++)
-    for (let j = i + 1; j < bends.length; j++) {
-      const a = bends[i]!,
-        b = bends[j]!
-      if (
-        b.start < a.end - EPS &&
-        (!a.movingOutline ||
-          !b.movingOutline ||
-          polygonsTouch(a.movingOutline, b.movingOutline))
-      )
-        throw new PcbFoldError({
-          code: "overlapping_bend_zones",
-          message: "Overlapping PCB bend zones are not supported",
-          bendId: b.id,
-        })
-    }
-  const distalFirst = [...bends].reverse()
+  const proximalFirst = orderPcbBends(bends)
+  const distalFirst = [...proximalFirst].reverse()
   const transform = ({
     p,
     anchor,
@@ -225,7 +267,7 @@ export function createPcbFold(
     return { x: dot(axes[0]!), y: dot(axes[1]!), z: dot(axes[2]!) }
   }
   return {
-    bends,
+    bends: proximalFirst,
     inversePoint: (p, anchor) =>
       inverse({ p: p, anchor: anchor, direction: false }),
     inverseDirection: (p, anchor) =>
