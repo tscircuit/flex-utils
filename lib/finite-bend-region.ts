@@ -209,3 +209,50 @@ export function polygonsTouch(a: readonly Point2[], b: readonly Point2[]) {
     }
   return false
 }
+
+/** Test full containment in board-local XY (mm), including shared boundaries.
+ * Split each contained edge at boundary crossings so a chord across a concavity
+ * cannot pass this test merely because its endpoints are inside.
+ */
+export function polygonContainsPolygon(
+  boundary: readonly Point2[],
+  polygon: readonly Point2[],
+) {
+  if (polygon.some((p) => !pointInPolygon(p, boundary))) return false
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i]!,
+      b = polygon[(i + 1) % polygon.length]!
+    const dx = b.x - a.x,
+      dy = b.y - a.y
+    const lengthSquared = dx * dx + dy * dy
+    if (lengthSquared < EPS * EPS) continue
+    const crossings = [0, 1]
+    for (let j = 0; j < boundary.length; j++) {
+      const c = boundary[j]!,
+        d = boundary[(j + 1) % boundary.length]!
+      const ex = d.x - c.x,
+        ey = d.y - c.y
+      const denominator = dx * ey - dy * ex
+      const cx = c.x - a.x,
+        cy = c.y - a.y
+      if (Math.abs(denominator) < EPS) {
+        if (Math.abs(cx * dy - cy * dx) > EPS) continue
+        for (const p of [c, d]) {
+          const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared
+          if (t > 0 && t < 1) crossings.push(t)
+        }
+      } else {
+        const t = (cx * ey - cy * ex) / denominator
+        const u = (cx * dy - cy * dx) / denominator
+        if (t > 0 && t < 1 && u >= -EPS && u <= 1 + EPS) crossings.push(t)
+      }
+    }
+    crossings.sort((a, b) => a - b)
+    for (let j = 1; j < crossings.length; j++) {
+      const t = (crossings[j - 1]! + crossings[j]!) / 2
+      if (!pointInPolygon({ x: a.x + t * dx, y: a.y + t * dy }, boundary))
+        return false
+    }
+  }
+  return true
+}
